@@ -1,7 +1,6 @@
-print("Bienvenido a CRIM-AI")
-print("Sistema de investigación criminológica iniciado")
+
 import streamlit as st
-import requests
+from google import genai
 
 # Configuración de CRIM-AI
 st.set_page_config(
@@ -14,9 +13,8 @@ st.subheader("Sistema de investigación criminológica")
 
 st.write("Asistente de inteligencia artificial para el análisis de casos.")
 
-# Configuración del modelo
-MODELO = "qwen2.5:3b"
-URL = "http://localhost:11434/api/chat"
+# Configuración de Gemini
+MODELO = "gemini-3.8-flash"
 
 # Instrucciones de la IA
 INSTRUCCIONES = """
@@ -33,6 +31,9 @@ Distingue siempre entre:
 
 No inventes pruebas, confesiones ni información.
 No presentes simulaciones como testimonios reales.
+No atribuyas pensamientos privados como si fueran hechos.
+No emitas diagnósticos clínicos ni afirmes culpabilidad.
+Explica las limitaciones de la información disponible.
 """
 
 # Historial de conversación
@@ -59,24 +60,32 @@ if pregunta:
     with st.chat_message("assistant"):
         with st.spinner("CRIM-AI está pensando..."):
             try:
-                respuesta = requests.post(
-                    URL,
-                    json={
-                        "model": MODELO,
-                        "messages": [
-                            {
-                                "role": "system",
-                                "content": INSTRUCCIONES
-                            },
-                            *st.session_state.mensajes
-                        ],
-                        "stream": False
-                    },
-                    timeout=180
+                api_key = st.secrets["gemini"]["api_key"]
+                cliente = genai.Client(api_key=api_key)
+
+                historial = []
+
+                for mensaje in st.session_state.mensajes:
+                    rol = "user" if mensaje["role"] == "user" else "model"
+
+                    historial.append({
+                        "role": rol,
+                        "parts": [{"text": mensaje["content"]}]
+                    })
+
+                respuesta = cliente.models.generate_content(
+                    model=MODELO,
+                    contents=historial,
+                    config={
+                        "system_instruction": INSTRUCCIONES
+                    }
                 )
 
-                respuesta.raise_for_status()
-                texto = respuesta.json()["message"]["content"]
+                texto = respuesta.text
+
+                if not texto:
+                    texto = "No recibí una respuesta de Gemini."
+
                 st.write(texto)
 
                 st.session_state.mensajes.append({
@@ -84,5 +93,8 @@ if pregunta:
                     "content": texto
                 })
 
-            except requests.exceptions.RequestException as error:
-                st.error(f"No pude conectar con Ollama: {error}")
+            except KeyError:
+                st.error("No encuentro la API key. Revisa la configuración de Secrets.")
+
+            except Exception as error:
+                st.error(f"Error al conectar con Gemini: {error}")
